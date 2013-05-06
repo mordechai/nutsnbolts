@@ -13,13 +13,13 @@ class Image <
 end
 
 $LOG = Logger.new('logs/application.log', 0, 100 * 1024 * 1024)
-@g = Graphite.new({:host => :graphite_url, :port => 2003})
+@g = Graphite.new({:host => "15.185.170.205", :port => 2003})
 # need to add output yaml folder for server files /home/ubuntu/projects/console-mgr/code/files
 az_zones=["az-1.region-a.geo-1","az-2.region-a.geo-1","az-3.region-a.geo-1"]
 def get_av_servers(az_id)
-    create_connection(az_id)
-    total_servers =  @conn.servers.size
-    @conn = nil
+    conn = create_connection(az_id)
+    total_servers =  conn.servers.size
+    conn = nil
     return total_servers
 end
 
@@ -34,14 +34,15 @@ end
 
 def create_connection(az_id)
 
-    @conn = Fog::Compute.new(
+return conn = Fog::Compute.new(
        :provider      => "HP",
-       :hp_account_id  => ENV['HP_ACCOUNT_ID'],
+       :hp_access_key  => ENV['HP_ACCESS_KEY'],
        :hp_secret_key =>  ENV['HP_SECRET_KEY'],
        :hp_auth_uri   =>  ENV['HP_AUTH_URI'],
        :hp_tenant_id =>   ENV['HP_TENANT_ID'],
        :hp_avl_zone => az_id,
-       :hp_use_upass_auth_style => "true",
+       :hp_use_upass_auth_style => "false",
+       :user_agent => "console_mordechai/15.185.230.23",
        :connection_options => { :connect_timeout => 30, :read_timeout => 30, :write_timeout => 30 })
 
 end
@@ -49,13 +50,13 @@ end
 def instances_by_owner(sample_az)
 # Define hash as place holders for data and pull data from HP Console
   total_instance, held_machines = Hash.new(0), Hash.new(0)
-  create_connection(sample_az)
+  conn = create_connection(sample_az)
 
 # Get List of Instance 'owners' by PPK name
-  result = @conn.servers.inject([]) { |result,h| result << h.key_name unless result.include?(h.key_name); result }
+  result = conn.servers.inject([]) { |result,h| result << h.key_name unless result.include?(h.key_name); result }
 
 # Create Hash of Total Instances owned by each PPK that are also in active state aka running
-  result.each do |v| @conn.servers.each do |n|
+  result.each do |v| conn.servers.each do |n|
         held_machines[v] +=1 if v == n.key_name && n.state=~/ACTIVE/
         # total_instance[v] +=1 if v == n.key_name -- not needed.
         end
@@ -64,7 +65,7 @@ def instances_by_owner(sample_az)
     v ||= 0
     push_data("stats.HPCS.#{sample_az}.instances.owner.#{k} #{v} #{@g.time_now}")
   end
-@conn = nil
+conn = nil
 end
 
 def store_hash(array1,id,data)
@@ -85,24 +86,24 @@ def instances_by_owner_size(sample_az)
   ppk_owners = Hash.new(0)
   images = Array.new
 
- create_connection(sample_az)
+  conn = create_connection(sample_az)
 
 # Get List of Instance 'owners' by PPK name
-  result = @conn.servers.inject([]) { |result,h| result << h.key_name unless result.include?(h.key_name); result }
+  result = conn.servers.inject([]) { |result,h| result << h.key_name unless result.include?(h.key_name); result }
 
 # Get List of Instance Sizes types by ID @conn.flavors aka server.flavor id
-  flavor_id_list_result = @conn.flavors.inject([]) { |flavor_id_list_result,h| flavor_id_list_result.to_a << h.id  unless flavor_id_list_result.include?(h.id); flavor_id_list_result }
+  flavor_id_list_result = conn.flavors.inject([]) { |flavor_id_list_result,h| flavor_id_list_result.to_a << h.id  unless flavor_id_list_result.include?(h.id); flavor_id_list_result }
 
   flavor_id_list_result.each {|x| images << Image.new( x, '', owners=Hash.new{0})}
   # Get List of Instance Sizes Names @conn.flavors.name
-  flavor_name_list = @conn.flavors.inject([]) { |flavor_name_list,h| flavor_name_list << h.name unless flavor_name_list.include?(h.name); flavor_name_list }
+  flavor_name_list = conn.flavors.inject([]) { |flavor_name_list,h| flavor_name_list << h.name unless flavor_name_list.include?(h.name); flavor_name_list }
   flavor_name_list = flavor_name_list.map {|name| name.gsub!('.','_')}
 
 
- result.each do |v| @conn.servers.each do |n|
+ result.each do |v| conn.servers.each do |n|
         if v == n.key_name  then
            images[find_images(n.flavor_id.to_i,images)].owners[v] +=1
-           images[find_images(n.flavor_id.to_i,images)].type = convert_typeId_typeName(n.flavor_id.to_i).to_s
+           images[find_images(n.flavor_id.to_i,images)].type = convert_typeId_typeName(n.flavor_id.to_i,conn).to_s
         end
         end
   end
@@ -112,7 +113,7 @@ def instances_by_owner_size(sample_az)
   end
 
  send_type_by_owner(images,sample_az)
-@conn = nil
+ conn = nil
 end
 
 
@@ -123,9 +124,9 @@ def send_type_by_owner(images,sample_az)
   end
    end
 end
-def convert_typeId_typeName(serverid)
+def convert_typeId_typeName(serverid,conn)
     iter = ''
-   @conn.flavors.each_with_index do |val, id|
+    conn.flavors.each_with_index do |val, id|
       iter = id if val.id == serverid
     end
     flavor_name = @conn.flavors[iter].name
@@ -138,18 +139,18 @@ def push_data(somedata)
   end
 end
 
-def do_work(az_zones)
-a_thread = Thread.new{ az_zones.each { |x|  push_data("stats.HPCS.#{x}.instances.total #{get_av_servers(x)} #{@g.time_now}")}}
-b_thread = Thread.new{ az_zones.each { |x|  instances_by_owner(x)}}
-c_thread = Thread.new{ az_zones.each { |x|  instances_by_owner_size(x)}}
+def do_work(az_zones, zzz)
+a_thread = Thread.new{ az_zones.each { |x|  push_data("stats.HPCS.#{x}.instances.total #{get_av_servers(x)} #{@g.time_now}")}; sleep zzz}
+b_thread = Thread.new{ az_zones.each { |x|  instances_by_owner(x)}; sleep zzz}
+c_thread = Thread.new{ az_zones.each { |x|  instances_by_owner_size(x)}; sleep zzz}
+
 end
 
 begin
   retries = 0
 
 while true
-  do_work(az_zones)
-  sleep 1
+  do_work(az_zones, 230)
   end
 rescue Exception => msg
   retries = retries + 1
