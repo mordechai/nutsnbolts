@@ -13,7 +13,7 @@ class Image <
 end
 
 $LOG = Logger.new('logs/application.log', 0, 100 * 1024 * 1024)
-@g = Graphite.new({:host => "15.185.170.205", :port => 2003})
+@g = Graphite.new({:host => :graphite, :port => 2003})
 # need to add output yaml folder for server files /home/ubuntu/projects/console-mgr/code/files
 az_zones=["az-1.region-a.geo-1","az-2.region-a.geo-1","az-3.region-a.geo-1"]
 def get_av_servers(az_id)
