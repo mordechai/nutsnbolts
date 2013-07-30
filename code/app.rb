@@ -42,7 +42,7 @@ return conn = Fog::Compute.new(
        :hp_tenant_id =>   ENV['HP_TENANT_ID'],
        :hp_avl_zone => az_id,
        :hp_use_upass_auth_style => "false",
-       :user_agent => "console_mordechai/15.185.230.23",
+       :user_agent => "console_mordechai/x.x.x.x",
        :connection_options => { :connect_timeout => 30, :read_timeout => 30, :write_timeout => 30 })
 
 end
